@@ -1,0 +1,28 @@
+# Gradle / Android build output — ye sab build ke time bante hain,
+# GitHub par inhe bhejne ki koi zarurat nahi (aur repo bhaari ho jaata hai).
+.gradle/
+build/
+/app/build/
+.cxx/
+.externalNativeBuild/
+/captures/
+
+# Machine-specific — ismein aapke laptop ka SDK path hota hai,
+# doosri machine par galat hoga.
+local.properties
+
+# Android Studio / IntelliJ
+*.iml
+.idea/
+
+# Signing keys — ye kabhi commit nahi hone chahiye.
+*.jks
+*.keystore
+
+# Build artifacts (APK GitHub Actions se download hogi, repo se nahi)
+*.apk
+*.aab
+
+# OS junk
+.DS_Store
+Thumbs.db
