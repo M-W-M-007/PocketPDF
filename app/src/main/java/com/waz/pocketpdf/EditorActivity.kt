@@ -1,0 +1,368 @@
+package com.waz.pocketpdf
+
+import android.app.AlertDialog
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.RectF
+import android.os.Bundle
+import android.text.InputType
+import android.view.MotionEvent
+import android.view.View
+import android.widget.CheckBox
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import com.waz.pocketpdf.databinding.ActivityEditorBinding
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+
+/**
+ * Page view with three tap modes: retype existing text, drop new text, or stamp
+ * a signature. Edits apply to the working copy; the original file is untouched
+ * until the user saves from the home screen.
+ */
+class EditorActivity : AppCompatActivity() {
+
+    private enum class Mode { EDIT, ADD_TEXT, ERASE, SIGN }
+
+    private lateinit var binding: ActivityEditorBinding
+
+    private var pageIndex = 0
+    private var pageCount = 0
+    private var mode = Mode.EDIT
+
+    private var pageBitmap: Bitmap? = null
+    private var pageSize: PdfRender.PageSize? = null
+    private var hits: List<PdfOps.TextHit> = emptyList()
+
+    /** Bitmap pixels per PDF point. Everything tapped converts through this. */
+    private var scale = 1f
+
+    private var pendingSignature: Bitmap? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        binding = ActivityEditorBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        pageCount = PdfSession.workingFile?.let { PdfRender.pageCount(it) } ?: 0
+        if (pageCount == 0) {
+            Toast.makeText(this, "PDF load nahi hui.", Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
+
+        binding.prevButton.setOnClickListener { goTo(pageIndex - 1) }
+        binding.nextButton.setOnClickListener { goTo(pageIndex + 1) }
+
+        binding.modeEdit.setOnClickListener { setMode(Mode.EDIT) }
+        binding.modeAdd.setOnClickListener { setMode(Mode.ADD_TEXT) }
+        binding.modeErase.setOnClickListener { setMode(Mode.ERASE) }
+        binding.modeSign.setOnClickListener { setMode(Mode.SIGN) }
+
+        binding.pageImage.setOnTouchListener { _, event ->
+            if (event.action == MotionEvent.ACTION_UP) onPageTapped(event.x, event.y)
+            true
+        }
+
+        binding.regionSelect.onRegion = { rect -> eraseRegion(rect) }
+
+        setMode(Mode.EDIT)
+
+        // The render target width is the view's width, so wait for layout.
+        binding.pageImage.post { renderPage() }
+    }
+
+    // ------------------------------------------------------------------ view
+
+    private fun setMode(m: Mode) {
+        mode = m
+        // Let the group own the checked state; setting each button individually
+        // fights its single-selection logic.
+        binding.modeGroup.check(
+            when (m) {
+                Mode.EDIT -> R.id.modeEdit
+                Mode.ADD_TEXT -> R.id.modeAdd
+                Mode.ERASE -> R.id.modeErase
+                Mode.SIGN -> R.id.modeSign
+            }
+        )
+
+        // Only erase mode needs the drag overlay; the rest want plain taps.
+        binding.regionSelect.visibility = if (m == Mode.ERASE) View.VISIBLE else View.GONE
+
+        binding.hint.text = when (m) {
+            Mode.EDIT -> "Jis line ko badalna hai uspar tap karein."
+            Mode.ADD_TEXT -> "Jahan naya text likhna hai wahan tap karein."
+            Mode.ERASE -> "Jo hissa mitana hai uspar ungli se box kheenchein. Patch page ke rang ka hoga, border nahi aayegi."
+            Mode.SIGN -> "Signature banane ke liye tap karein, phir jagah chunein."
+        }
+    }
+
+    private fun goTo(index: Int) {
+        if (index !in 0 until pageCount) return
+        pageIndex = index
+        renderPage()
+    }
+
+    private fun renderPage() {
+        val file = PdfSession.workingFile ?: return
+        val targetWidth = binding.pageImage.width.takeIf { it > 0 } ?: return
+
+        binding.progress.visibility = View.VISIBLE
+
+        lifecycleScope.launch {
+            val rendered = withContext(Dispatchers.IO) {
+                PdfRender.renderPage(file, pageIndex, targetWidth)
+            }
+            val found = withContext(Dispatchers.IO) {
+                runCatching { PdfOps.textHits(file, pageIndex) }.getOrDefault(emptyList())
+            }
+
+            binding.progress.visibility = View.GONE
+
+            if (rendered == null) {
+                Toast.makeText(
+                    this@EditorActivity,
+                    "Page render nahi hua. PDF encrypted ho sakti hai.",
+                    Toast.LENGTH_LONG
+                ).show()
+                return@launch
+            }
+
+            val (bitmap, size) = rendered
+            pageBitmap = bitmap
+            pageSize = size
+            hits = found
+            scale = bitmap.width / size.widthPt
+
+            binding.pageImage.setImageBitmap(bitmap)
+            binding.pageLabel.text = "Page ${pageIndex + 1} / $pageCount"
+            binding.prevButton.isEnabled = pageIndex > 0
+            binding.nextButton.isEnabled = pageIndex < pageCount - 1
+
+            if (found.isEmpty() && mode == Mode.EDIT) {
+                binding.hint.text =
+                    "Is page par koi select karne layak text nahi mila — shayad yeh scan ki hui image hai. " +
+                        "Aise page par \"Add text\" use karein."
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ taps
+
+    private fun onPageTapped(viewX: Float, viewY: Float) {
+        if (scale <= 0f) return
+
+        val pdfX = viewX / scale
+        val pdfY = viewY / scale
+
+        when (mode) {
+            Mode.EDIT -> {
+                val hit = hits.firstOrNull { it.contains(pdfX, pdfY) }
+                if (hit == null) {
+                    Toast.makeText(this, "Yahan koi text nahi mila.", Toast.LENGTH_SHORT).show()
+                } else {
+                    askReplacement(hit)
+                }
+            }
+
+            Mode.ADD_TEXT -> askNewText(pdfX, pdfY)
+
+            Mode.ERASE -> Unit // handled by the drag overlay
+
+            Mode.SIGN -> {
+                val sig = pendingSignature
+                if (sig == null) drawSignature()
+                else placeSignature(sig, pdfX, pdfY)
+            }
+        }
+    }
+
+    private fun askReplacement(hit: PdfOps.TextHit) {
+        val input = EditText(this).apply {
+            setText(hit.text)
+            setSelection(hit.text.length)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            setPadding(48, 32, 48, 32)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Text badlein")
+            .setView(input)
+            .setPositiveButton("Apply") { _, _ ->
+                applyReplacement(hit, input.text.toString())
+            }
+            .setNeutralButton("Mitayein") { _, _ ->
+                applyReplacement(hit, "")
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun applyReplacement(hit: PdfOps.TextHit, newText: String) {
+        val file = PdfSession.workingFile ?: return
+        val bitmap = pageBitmap
+
+        // Sample the paper colour around the old text so the patch disappears
+        // into the page instead of leaving a white block.
+        val background = if (bitmap != null) {
+            PdfRender.sampleBackground(
+                bitmap,
+                (hit.left * scale).toInt(),
+                (hit.top * scale).toInt(),
+                (hit.right * scale).toInt(),
+                (hit.bottom * scale).toInt()
+            )
+        } else {
+            Color.WHITE
+        }
+
+        runOp { PdfOps.replaceText(file, pageIndex, hit, newText, background) }
+    }
+
+    private fun askNewText(pdfX: Float, pdfY: Float) {
+        val file = PdfSession.workingFile ?: return
+
+        val input = EditText(this).apply {
+            hint = "Yahan likhein"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+        }
+
+        // Writing on top of existing content without clearing it leaves both
+        // visible, so offer the patch right here rather than making it a
+        // separate two-step job.
+        val cover = CheckBox(this).apply {
+            text = "Neeche ka text pehle dhak dein"
+            isChecked = true
+        }
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 24, 48, 8)
+            addView(input)
+            addView(cover)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Naya text")
+            .setView(container)
+            .setPositiveButton("Add") { _, _ ->
+                val text = input.text.toString()
+                if (text.isBlank()) return@setPositiveButton
+
+                val background = sampleAround(pdfX, pdfY)
+                runOp {
+                    PdfOps.addText(
+                        source = file,
+                        pageIndex = pageIndex,
+                        xPt = pdfX,
+                        topY = pdfY,
+                        text = text,
+                        coverBackground = cover.isChecked,
+                        backgroundColor = background
+                    )
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun eraseRegion(rect: RectF) {
+        val file = PdfSession.workingFile ?: return
+        if (scale <= 0f) return
+        val bitmap = pageBitmap
+
+        val background = if (bitmap != null) {
+            PdfRender.sampleBackground(
+                bitmap,
+                rect.left.toInt(), rect.top.toInt(),
+                rect.right.toInt(), rect.bottom.toInt()
+            )
+        } else {
+            Color.WHITE
+        }
+
+        runOp {
+            PdfOps.coverArea(
+                source = file,
+                pageIndex = pageIndex,
+                xPt = rect.left / scale,
+                topY = rect.top / scale,
+                widthPt = rect.width() / scale,
+                heightPt = rect.height() / scale,
+                color = background
+            )
+        }
+    }
+
+    /** Page colour near a point, so a patch there blends into the paper. */
+    private fun sampleAround(pdfX: Float, pdfY: Float): Int {
+        val bitmap = pageBitmap ?: return Color.WHITE
+        val px = (pdfX * scale).toInt()
+        val py = (pdfY * scale).toInt()
+        return PdfRender.sampleBackground(bitmap, px, py, px + 2, py + 2)
+    }
+
+    private fun drawSignature() {
+        val view = layoutInflater.inflate(R.layout.dialog_signature, null)
+        val pad = view.findViewById<SignatureView>(R.id.signaturePad)
+
+        AlertDialog.Builder(this)
+            .setTitle("Signature banayein")
+            .setView(view)
+            .setPositiveButton("Ready") { _, _ ->
+                val bmp = pad.toBitmap()
+                if (bmp == null) {
+                    Toast.makeText(this, "Kuch banaya nahi gaya.", Toast.LENGTH_SHORT).show()
+                } else {
+                    pendingSignature = bmp
+                    Toast.makeText(
+                        this,
+                        "Ab page par wahan tap karein jahan signature rakhna hai.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+            .setNeutralButton("Clear") { _, _ -> pad.clear() }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun placeSignature(sig: Bitmap, pdfX: Float, pdfY: Float) {
+        val file = PdfSession.workingFile ?: return
+        // 150pt wide is roughly a real signature on A4.
+        runOp { PdfOps.addImage(file, pageIndex, sig, pdfX, pdfY, 150f) }
+        pendingSignature = null
+    }
+
+    // ------------------------------------------------------------------ apply
+
+    /** Runs a PDF write off the main thread, then swaps in the result. */
+    private fun runOp(block: () -> Result<File>) {
+        binding.progress.visibility = View.VISIBLE
+
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) { block() }
+            binding.progress.visibility = View.GONE
+
+            result.fold(
+                onSuccess = {
+                    PdfSession.replaceWorking(it)
+                    renderPage()
+                },
+                onFailure = {
+                    Toast.makeText(
+                        this@EditorActivity,
+                        "Edit fail: ${it.localizedMessage}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            )
+        }
+    }
+}
