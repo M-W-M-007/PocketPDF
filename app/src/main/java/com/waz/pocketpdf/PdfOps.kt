@@ -33,7 +33,8 @@ object PdfOps {
         val top: Float,
         val right: Float,
         val bottom: Float,
-        val fontSize: Float
+        val fontSize: Float,
+        val bold: Boolean = false
     ) {
         fun contains(x: Float, y: Float, pad: Float = 4f) =
             x >= left - pad && x <= right + pad && y >= top - pad && y <= bottom + pad
@@ -70,8 +71,16 @@ object PdfOps {
                     var right = Float.MIN_VALUE
                     var bottom = Float.MIN_VALUE
                     var size = 0f
+                    var bold = false
 
                     for (p in visible) {
+                        // The embedded font name is the only weight signal
+                        // available here, and it is reliable enough: almost
+                        // every bold face carries "Bold" or "Black" in its name.
+                        val fontName = runCatching { p.font?.name.orEmpty() }.getOrDefault("")
+                        if (fontName.contains("Bold", true) || fontName.contains("Black", true)) {
+                            bold = true
+                        }
                         left = minOf(left, p.xDirAdj)
                         top = minOf(top, p.yDirAdj - p.heightDir)
                         right = maxOf(right, p.xDirAdj + p.widthDirAdj)
@@ -85,7 +94,8 @@ object PdfOps {
                         top = top,
                         right = right,
                         bottom = bottom,
-                        fontSize = if (size > 0.5f) size else 11f
+                        fontSize = if (size > 0.5f) size else 11f,
+                        bold = bold
                     )
                 }
             }
@@ -142,8 +152,9 @@ object PdfOps {
                     text = newText,
                     xPt = hit.left,
                     baselinePt = pageHeight - hit.bottom + hit.height * 0.18f,
-                    size = fitSize(newText, hit),
-                    color = textColor
+                    size = fitSize(newText, hit, page.mediaBox.width),
+                    color = textColor,
+                    bold = hit.bold
                 )
             }
         }
@@ -389,9 +400,10 @@ object PdfOps {
         xPt: Float,
         baselinePt: Float,
         size: Float,
-        color: Int
+        color: Int,
+        bold: Boolean = false
     ) {
-        val font = PDType1Font.HELVETICA
+        val font = if (bold) PDType1Font.HELVETICA_BOLD else PDType1Font.HELVETICA
         cs.setNonStrokingColor(
             Color.red(color) / 255f,
             Color.green(color) / 255f,
@@ -414,16 +426,25 @@ object PdfOps {
      * old text occupied — otherwise longer replacements run into neighbouring
      * text. Never grows it, and never goes below 5pt.
      */
-    private fun fitSize(text: String, hit: TextHit): Float {
+    /**
+     * Keeps the original size. Replacing "5" with "50000" needs more room than
+     * the old text occupied, and shrinking to fit that old width made the number
+     * visibly smaller than everything around it — which reads as damage. The
+     * space to the right of a short value is almost always empty, so the text is
+     * allowed to run into it, and only a replacement that would spill off the
+     * page edge gets scaled down at all.
+     */
+    private fun fitSize(text: String, hit: TextHit, pageWidth: Float): Float {
+        val font = if (hit.bold) PDType1Font.HELVETICA_BOLD else PDType1Font.HELVETICA
         val widthAtSize = { s: Float ->
-            PDType1Font.HELVETICA.getStringWidth(sanitize(text)) / 1000f * s
+            font.getStringWidth(sanitize(text)) / 1000f * s
         }
+
+        val roomToPageEdge = (pageWidth - hit.left - 18f).coerceAtLeast(24f)
+
         var size = hit.fontSize
-        // Floor at 80% of the original. Shrinking further to force a long
-        // replacement onto one line makes the patch obviously different from
-        // the text around it — better to let it run slightly wide.
-        val floor = maxOf(5f, hit.fontSize * 0.8f)
-        while (size > floor && widthAtSize(size) > hit.width * 1.02f) size -= 0.25f
+        val floor = maxOf(5f, hit.fontSize * 0.6f)
+        while (size > floor && widthAtSize(size) > roomToPageEdge) size -= 0.25f
         return size
     }
 

@@ -97,4 +97,54 @@ object PdfRender {
         // Median-ish: the most common sample, so one stray dark pixel can't win.
         return samples.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: Color.WHITE
     }
+
+    /**
+     * Works out what colour the existing text is drawn in, so a replacement can
+     * be written in the same colour. Without this, coloured figures on a receipt
+     * come back black and the edit stands out immediately.
+     *
+     * Everything close to [background] is paper, so it is skipped; of what
+     * remains, the most common colour is the ink. Colours are quantised before
+     * counting because anti-aliasing spreads a single ink colour across dozens
+     * of near-identical shades.
+     */
+    fun sampleTextColor(
+        bitmap: Bitmap,
+        leftPx: Int,
+        topPx: Int,
+        rightPx: Int,
+        bottomPx: Int,
+        background: Int,
+        fallback: Int = Color.BLACK
+    ): Int {
+        val l = leftPx.coerceIn(0, bitmap.width - 1)
+        val t = topPx.coerceIn(0, bitmap.height - 1)
+        val r = rightPx.coerceIn(l + 1, bitmap.width)
+        val b = bottomPx.coerceIn(t + 1, bitmap.height)
+
+        val counts = HashMap<Int, Int>()
+
+        for (y in t until b) {
+            for (x in l until r) {
+                val p = bitmap.getPixel(x, y)
+                if (distance(p, background) < 90) continue      // paper
+                val q = Color.rgb(
+                    Color.red(p) / 24 * 24,
+                    Color.green(p) / 24 * 24,
+                    Color.blue(p) / 24 * 24
+                )
+                counts[q] = (counts[q] ?: 0) + 1
+            }
+        }
+
+        // Too few ink pixels means the sample is unreliable — don't guess.
+        val best = counts.maxByOrNull { it.value } ?: return fallback
+        if (best.value < 6) return fallback
+        return best.key
+    }
+
+    private fun distance(a: Int, b: Int): Int =
+        kotlin.math.abs(Color.red(a) - Color.red(b)) +
+            kotlin.math.abs(Color.green(a) - Color.green(b)) +
+            kotlin.math.abs(Color.blue(a) - Color.blue(b))
 }

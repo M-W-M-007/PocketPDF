@@ -254,21 +254,27 @@ class EditorActivity : AppCompatActivity() {
         val file = PdfSession.workingFile ?: return
         val bitmap = pageBitmap
 
+        val l = (hit.left * scale).toInt()
+        val t = (hit.top * scale).toInt()
+        val r = (hit.right * scale).toInt()
+        val b = (hit.bottom * scale).toInt()
+
         // Sample the paper colour around the old text so the patch disappears
         // into the page instead of leaving a white block.
         val background = if (bitmap != null) {
-            PdfRender.sampleBackground(
-                bitmap,
-                (hit.left * scale).toInt(),
-                (hit.top * scale).toInt(),
-                (hit.right * scale).toInt(),
-                (hit.bottom * scale).toInt()
-            )
+            PdfRender.sampleBackground(bitmap, l, t, r, b)
         } else {
             Color.WHITE
         }
 
-        runOp { PdfOps.replaceText(file, pageIndex, hit, newText, background) }
+        // And sample the ink, so a blue figure stays blue after the edit.
+        val ink = if (bitmap != null) {
+            PdfRender.sampleTextColor(bitmap, l, t, r, b, background)
+        } else {
+            Color.BLACK
+        }
+
+        runOp { PdfOps.replaceText(file, pageIndex, hit, newText, background, ink) }
     }
 
     private fun askNewText(pdfX: Float, pdfY: Float) {

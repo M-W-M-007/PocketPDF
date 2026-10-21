@@ -11,11 +11,28 @@ android {
         applicationId = "com.waz.pocketpdf"
         minSdk = 24
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 5
+        versionName = "1.4"
+    }
+
+    // A keystore that lives in the repo, so every build — local or CI — signs
+    // with the same key. Without this each CI run generates its own throwaway
+    // debug key, Android sees a signature mismatch, and installing a new APK
+    // fails with "package conflicts with an existing package" until the old app
+    // is uninstalled. This is a debug key only; it must never sign a Play release.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release { isMinifyEnabled = false }
     }
 

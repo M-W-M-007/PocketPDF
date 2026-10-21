@@ -26,3 +26,8 @@ local.properties
 # OS junk
 .DS_Store
 Thumbs.db
+
+# Exception: app/debug.keystore jaanbujh kar commit hoti hai, taaki har build
+# ek hi key se sign ho aur nayi APK purani ke upar install ho jaye.
+# Yeh sirf debug key hai — isse koi Play Store release sign nahi hoti.
+!app/debug.keystore
