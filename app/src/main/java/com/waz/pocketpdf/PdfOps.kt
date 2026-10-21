@@ -127,7 +127,13 @@ object PdfOps {
         hit: TextHit,
         newText: String,
         backgroundColor: Int = Color.WHITE,
-        textColor: Int = Color.BLACK
+        textColor: Int = Color.BLACK,
+        /**
+         * How much horizontal room the replacement may occupy, in points.
+         * The caller measures the gap to whatever sits next on the same line;
+         * without it a long replacement simply overlaps its neighbour.
+         */
+        maxWidthPt: Float? = null
     ): Result<File> = edit(source) { doc ->
         val page = doc.getPage(pageIndex)
         val pageHeight = page.mediaBox.height
@@ -137,12 +143,13 @@ object PdfOps {
         ).use { cs ->
             // A little padding, because glyph boxes sit tight against ascenders.
             val pad = 1.5f
+            val descender = hit.height * 0.24f
             fillRect(
                 cs,
                 hit.left - pad,
-                pageHeight - hit.bottom - pad,
+                pageHeight - hit.bottom - pad - descender,
                 hit.width + pad * 2,
-                hit.height + pad * 2,
+                hit.height + pad * 2 + descender,
                 backgroundColor
             )
 
@@ -151,8 +158,11 @@ object PdfOps {
                     cs = cs,
                     text = newText,
                     xPt = hit.left,
-                    baselinePt = pageHeight - hit.bottom + hit.height * 0.18f,
-                    size = fitSize(newText, hit, page.mediaBox.width),
+                    // hit.bottom already IS the baseline of the original run.
+                    // Adding a lift on top of it pushed replacements visibly
+                    // above the line they belong to.
+                    baselinePt = pageHeight - hit.bottom,
+                    size = fitSize(newText, hit, maxWidthPt ?: (page.mediaBox.width - hit.left - 18f)),
                     color = textColor,
                     bold = hit.bold
                 )
@@ -434,17 +444,17 @@ object PdfOps {
      * allowed to run into it, and only a replacement that would spill off the
      * page edge gets scaled down at all.
      */
-    private fun fitSize(text: String, hit: TextHit, pageWidth: Float): Float {
+    private fun fitSize(text: String, hit: TextHit, roomPt: Float): Float {
         val font = if (hit.bold) PDType1Font.HELVETICA_BOLD else PDType1Font.HELVETICA
         val widthAtSize = { s: Float ->
             font.getStringWidth(sanitize(text)) / 1000f * s
         }
 
-        val roomToPageEdge = (pageWidth - hit.left - 18f).coerceAtLeast(24f)
+        val room = roomPt.coerceAtLeast(24f)
 
         var size = hit.fontSize
         val floor = maxOf(5f, hit.fontSize * 0.6f)
-        while (size > floor && widthAtSize(size) > roomToPageEdge) size -= 0.25f
+        while (size > floor && widthAtSize(size) > room) size -= 0.25f
         return size
     }
 

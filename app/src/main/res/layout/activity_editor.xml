@@ -77,32 +77,79 @@
         android:indeterminate="true"
         android:visibility="gone" />
 
+    <!-- Vertical scroll wraps a horizontal one, so a zoomed page can be panned
+         in both directions instead of being cut off at the screen edge. -->
     <ScrollView
+        android:id="@+id/pageScroll"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
         android:background="#20808080">
 
-        <FrameLayout
+        <HorizontalScrollView
+            android:id="@+id/pageHScroll"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content">
+            android:layout_height="wrap_content"
+            android:fillViewport="true"
+            android:scrollbars="none">
 
-            <ImageView
-                android:id="@+id/pageImage"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:adjustViewBounds="true"
-                android:contentDescription="PDF page"
-                android:padding="0dp"
-                android:scaleType="fitStart" />
+            <FrameLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content">
 
-            <com.waz.pocketpdf.RegionSelectView
-                android:id="@+id/regionSelect"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:visibility="gone" />
-        </FrameLayout>
+                <ImageView
+                    android:id="@+id/pageImage"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:adjustViewBounds="true"
+                    android:contentDescription="PDF page"
+                    android:padding="0dp"
+                    android:scaleType="fitStart" />
+
+                <com.waz.pocketpdf.RegionSelectView
+                    android:id="@+id/regionSelect"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:visibility="gone" />
+            </FrameLayout>
+        </HorizontalScrollView>
     </ScrollView>
+
+    <!-- Zoom. Receipts set amounts in 7pt type; without this, hitting the right
+         line with a fingertip is guesswork. Pinch works too. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="8dp">
+
+        <Button
+            android:id="@+id/zoomOutButton"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:minWidth="56dp"
+            android:text="−" />
+
+        <TextView
+            android:id="@+id/zoomLabel"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="100%" />
+
+        <Button
+            android:id="@+id/zoomInButton"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:minWidth="56dp"
+            android:text="+" />
+    </LinearLayout>
 
     <!-- Page navigation. Hidden entirely on a one-page document, because
          permanently greyed arrows read as a broken control. -->

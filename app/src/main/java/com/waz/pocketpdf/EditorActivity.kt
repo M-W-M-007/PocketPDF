@@ -9,6 +9,7 @@ import android.text.InputType
 import android.view.Menu
 import android.view.MenuItem
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
 import android.widget.CheckBox
 import android.widget.EditText
@@ -48,6 +49,12 @@ class EditorActivity : AppCompatActivity() {
 
     private var pendingSignature: Bitmap? = null
 
+    /** 1f = fit to screen width. Re-rendering at this factor keeps text sharp. */
+    private var zoom = 1f
+    private var baseWidthPx = 0
+    private var isPinching = false
+    private lateinit var scaleDetector: ScaleGestureDetector
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityEditorBinding.inflate(layoutInflater)
@@ -78,7 +85,11 @@ class EditorActivity : AppCompatActivity() {
         binding.modeSign.setOnClickListener { setMode(Mode.SIGN) }
 
         binding.pageImage.setOnTouchListener { _, event ->
-            if (event.action == MotionEvent.ACTION_UP) onPageTapped(event.x, event.y)
+            if (event.action == MotionEvent.ACTION_UP &&
+                !isPinching && !scaleDetector.isInProgress && event.pointerCount == 1
+            ) {
+                onPageTapped(event.x, event.y)
+            }
             true
         }
 
@@ -93,7 +104,45 @@ class EditorActivity : AppCompatActivity() {
         setMode(Mode.EDIT)
 
         // The render target width is the view's width, so wait for layout.
-        binding.pageImage.post { renderPage() }
+        binding.zoomInButton.setOnClickListener { setZoom(zoom + 0.5f) }
+        binding.zoomOutButton.setOnClickListener { setZoom(zoom - 0.5f) }
+
+        scaleDetector = ScaleGestureDetector(this, object :
+            ScaleGestureDetector.SimpleOnScaleGestureListener() {
+
+            private var pending = 1f
+
+            override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+                isPinching = true
+                pending = zoom
+                return true
+            }
+
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                pending = (pending * detector.scaleFactor).coerceIn(1f, 4f)
+                binding.zoomLabel.text = "${(pending * 100).toInt()}%"
+                return true
+            }
+
+            override fun onScaleEnd(detector: ScaleGestureDetector) {
+                // Re-render once the gesture settles rather than on every frame:
+                // scaling the bitmap live would blur the text, and re-rendering
+                // per frame would stutter.
+                setZoom(pending)
+                binding.pageImage.postDelayed({ isPinching = false }, 150)
+            }
+        })
+
+        binding.pageScroll.setOnTouchListener { _, event ->
+            scaleDetector.onTouchEvent(event)
+            // Never consume: the scroll views still need these events to pan.
+            false
+        }
+
+        binding.pageImage.post {
+            baseWidthPx = binding.pageScroll.width
+            renderPage()
+        }
     }
 
     // ------------------------------------------------------------------ view
@@ -130,7 +179,8 @@ class EditorActivity : AppCompatActivity() {
 
     private fun renderPage() {
         val file = PdfSession.workingFile ?: return
-        val targetWidth = binding.pageImage.width.takeIf { it > 0 } ?: return
+        if (baseWidthPx <= 0) baseWidthPx = binding.pageScroll.width
+        val targetWidth = (baseWidthPx * zoom).toInt().takeIf { it > 0 } ?: return
 
         binding.progress.visibility = View.VISIBLE
 
@@ -274,7 +324,21 @@ class EditorActivity : AppCompatActivity() {
             Color.BLACK
         }
 
-        runOp { PdfOps.replaceText(file, pageIndex, hit, newText, background, ink) }
+        // How far this text may grow before it would collide with whatever sits
+        // next on the same line. Replacing "Rs." with "Rupees" next to an amount
+        // overlapped the amount until this was taken into account.
+        val neighbourLeft = hits
+            .filter { it !== hit && it.left > hit.left }
+            .filter { it.top < hit.bottom && it.bottom > hit.top }   // same line
+            .minOfOrNull { it.left }
+
+        val room = if (neighbourLeft != null) {
+            (neighbourLeft - hit.left - 2f)
+        } else {
+            pageSize?.let { it.widthPt - hit.left - 18f } ?: hit.width
+        }
+
+        runOp { PdfOps.replaceText(file, pageIndex, hit, newText, background, ink, room) }
     }
 
     private fun askNewText(pdfX: Float, pdfY: Float) {
@@ -441,6 +505,19 @@ class EditorActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Toast.makeText(this, "Save fail: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private fun setZoom(value: Float) {
+        val clamped = value.coerceIn(1f, 4f)
+        if (kotlin.math.abs(clamped - zoom) < 0.01f) {
+            binding.zoomLabel.text = "${(zoom * 100).toInt()}%"
+            return
+        }
+        zoom = clamped
+        binding.zoomLabel.text = "${(zoom * 100).toInt()}%"
+        binding.zoomOutButton.isEnabled = zoom > 1f
+        binding.zoomInButton.isEnabled = zoom < 4f
+        renderPage()
     }
 
     private fun undoLast() {
