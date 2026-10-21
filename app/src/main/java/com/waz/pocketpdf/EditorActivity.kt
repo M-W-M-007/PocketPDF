@@ -57,7 +57,7 @@ class EditorActivity : AppCompatActivity() {
         // the edit lands on the page and there is nothing on screen saying how to
         // keep it or how to get out.
         supportActionBar?.apply {
-            title = "Edit PDF"
+            title = "Edit PDF  ·  v${BuildConfig.VERSION_NAME}"
             subtitle = PdfSession.displayName
             setDisplayHomeAsUpEnabled(true)
         }
@@ -85,6 +85,10 @@ class EditorActivity : AppCompatActivity() {
         binding.regionSelect.onRegion = { rect -> eraseRegion(rect) }
 
         binding.undoButton.setOnClickListener { undoLast() }
+        binding.backButton.setOnClickListener { finish() }
+        binding.saveButton.setOnClickListener {
+            saveLauncher.launch(PdfSession.suggestedSaveName())
+        }
 
         setMode(Mode.EDIT)
 
@@ -157,6 +161,7 @@ class EditorActivity : AppCompatActivity() {
 
             binding.pageImage.setImageBitmap(bitmap)
             binding.pageLabel.text = "Page ${pageIndex + 1} / $pageCount"
+            binding.pageNavRow.visibility = if (pageCount > 1) View.VISIBLE else View.GONE
             binding.prevButton.isEnabled = pageIndex > 0
             binding.nextButton.isEnabled = pageIndex < pageCount - 1
             binding.undoButton.isEnabled = PdfSession.canUndo

@@ -8,6 +8,7 @@ jobs:
   build:
     # ubuntu-latest ko pin kiya hua hai jaanbujh kar: 19 Oct 2026 se woh label
     # Ubuntu 26 par shift ho raha hai, aur usi par pehli build tooti thi.
+    # Pin hone se build kal bhi waisi hi chalegi jaisi aaj chali.
     runs-on: ubuntu-24.04
 
     steps:

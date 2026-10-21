@@ -5,56 +5,68 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
-    <com.google.android.material.button.MaterialButtonToggleGroup
-        android:id="@+id/modeGroup"
+    <!-- Mode row. Horizontally scrollable so the labels are never clipped on
+         narrow screens, which is what happened when they were squeezed into
+         equal weights. -->
+    <HorizontalScrollView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:padding="12dp"
-        app:selectionRequired="true"
-        app:singleSelection="true">
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="10dp"
+        android:scrollbars="none">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/modeEdit"
-            style="?attr/materialButtonOutlinedStyle"
-            android:layout_width="0dp"
-            android:layout_weight="1"
+        <com.google.android.material.button.MaterialButtonToggleGroup
+            android:id="@+id/modeGroup"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Edit" />
+            app:selectionRequired="true"
+            app:singleSelection="true">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/modeAdd"
-            style="?attr/materialButtonOutlinedStyle"
-            android:layout_width="0dp"
-            android:layout_weight="1"
-            android:layout_height="wrap_content"
-            android:text="Add text" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/modeEdit"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:minWidth="88dp"
+                android:text="Edit" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/modeErase"
-            style="?attr/materialButtonOutlinedStyle"
-            android:layout_width="0dp"
-            android:layout_weight="1"
-            android:layout_height="wrap_content"
-            android:text="Erase" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/modeAdd"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:minWidth="88dp"
+                android:text="Add text" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/modeSign"
-            style="?attr/materialButtonOutlinedStyle"
-            android:layout_width="0dp"
-            android:layout_weight="1"
-            android:layout_height="wrap_content"
-            android:text="Sign" />
-    </com.google.android.material.button.MaterialButtonToggleGroup>
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/modeErase"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:minWidth="88dp"
+                android:text="Erase" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/modeSign"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:minWidth="88dp"
+                android:text="Sign" />
+        </com.google.android.material.button.MaterialButtonToggleGroup>
+    </HorizontalScrollView>
 
     <TextView
         android:id="@+id/hint"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:alpha="0.7"
+        android:lineSpacingMultiplier="1.25"
         android:paddingStart="16dp"
         android:paddingEnd="16dp"
+        android:paddingTop="8dp"
         android:paddingBottom="8dp"
-        android:lineSpacingMultiplier="1.25"
         android:textSize="13sp" />
 
     <ProgressBar
@@ -84,8 +96,6 @@
                 android:padding="0dp"
                 android:scaleType="fitStart" />
 
-            <!-- Drag-to-erase overlay. GONE except in erase mode, so normal
-                 taps go straight through to the page. -->
             <com.waz.pocketpdf.RegionSelectView
                 android:id="@+id/regionSelect"
                 android:layout_width="match_parent"
@@ -94,12 +104,17 @@
         </FrameLayout>
     </ScrollView>
 
+    <!-- Page navigation. Hidden entirely on a one-page document, because
+         permanently greyed arrows read as a broken control. -->
     <LinearLayout
+        android:id="@+id/pageNavRow"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:padding="12dp">
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="6dp">
 
         <Button
             android:id="@+id/prevButton"
@@ -117,19 +132,46 @@
             android:text="Page 1" />
 
         <Button
-            android:id="@+id/undoButton"
-            style="?attr/materialButtonOutlinedStyle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginEnd="6dp"
-            android:enabled="false"
-            android:text="Undo" />
-
-        <Button
             android:id="@+id/nextButton"
             style="?attr/materialButtonOutlinedStyle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="→" />
+    </LinearLayout>
+
+    <!-- The actions that matter after an edit, at thumb height and impossible
+         to miss. These were in the top app bar before, where they were small,
+         far from the thumb, and easy to overlook entirely. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="12dp">
+
+        <Button
+            android:id="@+id/backButton"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="0dp"
+            android:layout_height="52dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="8dp"
+            android:text="Back" />
+
+        <Button
+            android:id="@+id/undoButton"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="0dp"
+            android:layout_height="52dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="8dp"
+            android:enabled="false"
+            android:text="Undo" />
+
+        <Button
+            android:id="@+id/saveButton"
+            android:layout_width="0dp"
+            android:layout_height="52dp"
+            android:layout_weight="1.3"
+            android:text="Save PDF" />
     </LinearLayout>
 </LinearLayout>
