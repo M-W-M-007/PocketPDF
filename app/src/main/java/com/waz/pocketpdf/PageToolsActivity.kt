@@ -35,10 +35,21 @@ class PageToolsActivity : AppCompatActivity() {
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris -> if (uris.isNotEmpty()) mergeWith(uris) }
 
+    override fun onSupportNavigateUp(): Boolean {
+        finish()
+        return true
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityPageToolsBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        supportActionBar?.apply {
+            title = "Pages"
+            subtitle = PdfSession.displayName
+            setDisplayHomeAsUpEnabled(true)
+        }
 
         binding.grid.layoutManager = GridLayoutManager(this, 3)
 

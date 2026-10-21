@@ -53,6 +53,17 @@ Yeh app woh nahi karti. Iske bajaye:
 3. Agar naya text lamba hai, font size apne aap chhota ho jaata hai taaki
    aas-paas ke text se na takraye.
 
+### Kaunse documents par ye theek chalega — aur kaunse par nahi
+
+**Theek chalega:** forms, letters, invoices, certificates, agreements — jahan
+plain paragraphs hain aur aapko naam, date, amount ya ek line badalni hai.
+
+**Mat use karo:** resume/CV, brochures, magazines, multi-column layouts.
+Inme ek hi line ke andar bold aur normal mix hota hai, bullets hote hain, aur
+line spacing bahut ghani hoti hai. Patch ek hi font aur ek hi weight mein likhta
+hai, toh badla hua line aas-paas se alag dikhega. Resume Word ya Google Docs mein
+edit karke PDF export karna hi sahi hai — ye app us kaam ke liye nahi hai.
+
 **Iska matlab, imaandari se:**
 - Naam, date, amount, typo — yeh bilkul theek kaam karega.
 - Font exactly original jaisa nahi hoga. Serif document mein patch Helvetica mein

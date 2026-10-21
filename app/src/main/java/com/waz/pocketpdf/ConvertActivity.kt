@@ -38,10 +38,21 @@ class ConvertActivity : AppCompatActivity() {
 
     private var extracted: String = ""
 
+    override fun onSupportNavigateUp(): Boolean {
+        finish()
+        return true
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityConvertBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        supportActionBar?.apply {
+            title = "Convert"
+            subtitle = PdfSession.displayName
+            setDisplayHomeAsUpEnabled(true)
+        }
 
         binding.toImagesButton.setOnClickListener { pdfToImages() }
         binding.fromImagesButton.setOnClickListener {

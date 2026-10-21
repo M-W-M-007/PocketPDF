@@ -58,13 +58,20 @@ object PdfOps {
                 override fun writeString(text: String, positions: List<TextPosition>) {
                     if (text.isBlank() || positions.isEmpty()) return
 
+                    // Leading spaces and tabs carry their own glyph boxes that can
+                    // start at the page margin. Including them pushed replacement
+                    // text far left of where the visible text actually began, so
+                    // bounds are measured from visible glyphs only.
+                    val visible = positions.filter { it.unicode.isNotBlank() }
+                    if (visible.isEmpty()) return
+
                     var left = Float.MAX_VALUE
                     var top = Float.MAX_VALUE
                     var right = Float.MIN_VALUE
                     var bottom = Float.MIN_VALUE
                     var size = 0f
 
-                    for (p in positions) {
+                    for (p in visible) {
                         left = minOf(left, p.xDirAdj)
                         top = minOf(top, p.yDirAdj - p.heightDir)
                         right = maxOf(right, p.xDirAdj + p.widthDirAdj)
@@ -412,7 +419,11 @@ object PdfOps {
             PDType1Font.HELVETICA.getStringWidth(sanitize(text)) / 1000f * s
         }
         var size = hit.fontSize
-        while (size > 5f && widthAtSize(size) > hit.width * 1.02f) size -= 0.5f
+        // Floor at 80% of the original. Shrinking further to force a long
+        // replacement onto one line makes the patch obviously different from
+        // the text around it — better to let it run slightly wide.
+        val floor = maxOf(5f, hit.fontSize * 0.8f)
+        while (size > floor && widthAtSize(size) > hit.width * 1.02f) size -= 0.25f
         return size
     }
 
@@ -421,17 +432,37 @@ object PdfOps {
      * when written. Rather than failing the whole edit, map the common cases and
      * drop the rest.
      */
+    /**
+     * Characters outside Latin-1 that WinAnsiEncoding still represents, so they
+     * can be written as-is. The bullet matters most: dropping it silently
+     * un-bullets a list item and the line stops matching its neighbours.
+     */
+    private val WIN_ANSI_EXTRAS = setOf(
+        '•', // • bullet
+        '€', // € euro
+        '†', '‡', // † ‡ dagger
+        '‰', // ‰ per mille
+        '™', // ™ trademark
+        'Œ', 'œ', // Œ œ
+        'Š', 'š', // Š š
+        'Ž', 'ž', // Ž ž
+        'Ÿ', // Ÿ
+        'ƒ', // ƒ
+        'ˆ', '˜' // ˆ ˜
+    )
+
     private fun sanitize(text: String): String {
         val sb = StringBuilder(text.length)
         for (ch in text) {
-            when (ch) {
-                '‘', '’' -> sb.append('\'')
-                '“', '”' -> sb.append('"')
-                '–', '—' -> sb.append('-')
-                '…' -> sb.append("...")
-                ' ' -> sb.append(' ')
-                '\t' -> sb.append("    ")
-                else -> if (ch.code in 32..255) sb.append(ch)
+            when {
+                ch == '‘' || ch == '’' -> sb.append('\'')
+                ch == '“' || ch == '”' -> sb.append('"')
+                ch == '–' || ch == '—' -> sb.append('-')
+                ch == '…' -> sb.append("...")
+                ch == ' ' -> sb.append(' ')
+                ch == '\t' -> sb.append("    ")
+                ch in WIN_ANSI_EXTRAS -> sb.append(ch)
+                ch.code in 32..255 -> sb.append(ch)
             }
         }
         return sb.toString()

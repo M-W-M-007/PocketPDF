@@ -6,14 +6,18 @@ import android.graphics.Color
 import android.graphics.RectF
 import android.os.Bundle
 import android.text.InputType
+import android.view.Menu
+import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.View
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.snackbar.Snackbar
 import com.waz.pocketpdf.databinding.ActivityEditorBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -49,6 +53,15 @@ class EditorActivity : AppCompatActivity() {
         binding = ActivityEditorBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // Back arrow and a visible Save. Without these the editor is a dead end:
+        // the edit lands on the page and there is nothing on screen saying how to
+        // keep it or how to get out.
+        supportActionBar?.apply {
+            title = "Edit PDF"
+            subtitle = PdfSession.displayName
+            setDisplayHomeAsUpEnabled(true)
+        }
+
         pageCount = PdfSession.workingFile?.let { PdfRender.pageCount(it) } ?: 0
         if (pageCount == 0) {
             Toast.makeText(this, "PDF load nahi hui.", Toast.LENGTH_LONG).show()
@@ -70,6 +83,8 @@ class EditorActivity : AppCompatActivity() {
         }
 
         binding.regionSelect.onRegion = { rect -> eraseRegion(rect) }
+
+        binding.undoButton.setOnClickListener { undoLast() }
 
         setMode(Mode.EDIT)
 
@@ -96,7 +111,7 @@ class EditorActivity : AppCompatActivity() {
         binding.regionSelect.visibility = if (m == Mode.ERASE) View.VISIBLE else View.GONE
 
         binding.hint.text = when (m) {
-            Mode.EDIT -> "Jis line ko badalna hai uspar tap karein."
+            Mode.EDIT -> "Jis line ko badalna hai uspar tap karein. Ho jaane par upar \"Save\" dabayein."
             Mode.ADD_TEXT -> "Jahan naya text likhna hai wahan tap karein."
             Mode.ERASE -> "Jo hissa mitana hai uspar ungli se box kheenchein. Patch page ke rang ka hoga, border nahi aayegi."
             Mode.SIGN -> "Signature banane ke liye tap karein, phir jagah chunein."
@@ -144,6 +159,8 @@ class EditorActivity : AppCompatActivity() {
             binding.pageLabel.text = "Page ${pageIndex + 1} / $pageCount"
             binding.prevButton.isEnabled = pageIndex > 0
             binding.nextButton.isEnabled = pageIndex < pageCount - 1
+            binding.undoButton.isEnabled = PdfSession.canUndo
+            invalidateOptionsMenu()
 
             if (found.isEmpty() && mode == Mode.EDIT) {
                 binding.hint.text =
@@ -163,7 +180,7 @@ class EditorActivity : AppCompatActivity() {
 
         when (mode) {
             Mode.EDIT -> {
-                val hit = hits.firstOrNull { it.contains(pdfX, pdfY) }
+                val hit = findHit(pdfX, pdfY)
                 if (hit == null) {
                     Toast.makeText(this, "Yahan koi text nahi mila.", Toast.LENGTH_SHORT).show()
                 } else {
@@ -181,6 +198,30 @@ class EditorActivity : AppCompatActivity() {
                 else placeSignature(sig, pdfX, pdfY)
             }
         }
+    }
+
+    /**
+     * Exact hit first; otherwise the nearest line on the same row.
+     *
+     * Body text lines are only a few points tall, which is well under a
+     * fingertip — requiring an exact hit made most taps miss and report
+     * "no text here" on a page that was full of text.
+     */
+    private fun findHit(pdfX: Float, pdfY: Float): PdfOps.TextHit? {
+        hits.firstOrNull { it.contains(pdfX, pdfY) }?.let { return it }
+
+        // Within half a line height counts as aiming at that line.
+        return hits
+            .filter { pdfY >= it.top - it.height && pdfY <= it.bottom + it.height }
+            .minByOrNull { h ->
+                val dx = when {
+                    pdfX < h.left -> h.left - pdfX
+                    pdfX > h.right -> pdfX - h.right
+                    else -> 0f
+                }
+                val dy = kotlin.math.abs((h.top + h.bottom) / 2f - pdfY)
+                dx + dy * 2f
+            }
     }
 
     private fun askReplacement(hit: PdfOps.TextHit) {
@@ -342,6 +383,63 @@ class EditorActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------ apply
 
+    // ------------------------------------------------------------------ menu
+
+    private val saveLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/pdf")
+    ) { uri -> uri?.let { writeOut(it) } }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.editor_menu, menu)
+        return true
+    }
+
+    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
+        menu.findItem(R.id.action_undo)?.isEnabled = PdfSession.canUndo
+        return super.onPrepareOptionsMenu(menu)
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
+        android.R.id.home -> {
+            finish()
+            true
+        }
+
+        R.id.action_undo -> {
+            undoLast()
+            true
+        }
+
+        R.id.action_save -> {
+            saveLauncher.launch(PdfSession.suggestedSaveName())
+            true
+        }
+
+        else -> super.onOptionsItemSelected(item)
+    }
+
+    /** Writes the working copy out as a brand new file the user picks. */
+    private fun writeOut(target: android.net.Uri) {
+        val file = PdfSession.workingFile ?: return
+        try {
+            contentResolver.openOutputStream(target)?.use { out ->
+                file.inputStream().use { it.copyTo(out) }
+            }
+            PdfSession.dirty = false
+            Snackbar.make(binding.root, "Save ho gaya", Snackbar.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Save fail: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun undoLast() {
+        if (!PdfSession.undo()) {
+            Toast.makeText(this, "Undo karne ko kuch nahi hai.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        renderPage()
+    }
+
     /** Runs a PDF write off the main thread, then swaps in the result. */
     private fun runOp(block: () -> Result<File>) {
         binding.progress.visibility = View.VISIBLE
@@ -354,6 +452,12 @@ class EditorActivity : AppCompatActivity() {
                 onSuccess = {
                     PdfSession.replaceWorking(it)
                     renderPage()
+                    // Every edit is reversible, and saying so is the point —
+                    // without it the page just changes and there is no obvious
+                    // way back.
+                    Snackbar.make(binding.root, "Edit ho gaya", Snackbar.LENGTH_LONG)
+                        .setAction("Undo") { undoLast() }
+                        .show()
                 },
                 onFailure = {
                     Toast.makeText(

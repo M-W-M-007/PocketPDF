@@ -50,9 +50,18 @@ object PdfSession {
         }
     }
 
+    /** Snapshots taken before each edit, newest last. Capped so cache stays small. */
+    private val undoStack = ArrayDeque<File>()
+    private const val MAX_UNDO = 12
+
+    val canUndo: Boolean get() = undoStack.isNotEmpty()
+
     /** Replaces the working copy with [newFile], used after an edit succeeds. */
     fun replaceWorking(newFile: File) {
         val target = workingFile ?: return
+
+        pushUndo(target)
+
         if (newFile.absolutePath == target.absolutePath) {
             dirty = true
             return
@@ -62,12 +71,40 @@ object PdfSession {
         dirty = true
     }
 
+    private fun pushUndo(current: File) {
+        try {
+            val snap = File(current.parentFile, "undo-${System.nanoTime()}.pdf")
+            current.copyTo(snap, overwrite = true)
+            undoStack.addLast(snap)
+            while (undoStack.size > MAX_UNDO) undoStack.removeFirst().delete()
+        } catch (_: Exception) {
+            // An undo snapshot is a convenience; failing to take one must never
+            // block the edit itself.
+        }
+    }
+
+    /** Steps one edit back. Returns false when there is nothing left to undo. */
+    fun undo(): Boolean {
+        val target = workingFile ?: return false
+        val snap = undoStack.removeLastOrNull() ?: return false
+        return try {
+            snap.copyTo(target, overwrite = true)
+            snap.delete()
+            dirty = undoStack.isNotEmpty()
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     fun suggestedSaveName(): String {
         val base = displayName.removeSuffix(".pdf").removeSuffix(".PDF")
         return "$base-edited.pdf"
     }
 
     fun clear() {
+        undoStack.forEach { runCatching { it.delete() } }
+        undoStack.clear()
         workingFile = null
         displayName = "document.pdf"
         dirty = false
