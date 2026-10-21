@@ -43,6 +43,7 @@ class EditorActivity : AppCompatActivity() {
     private var pageBitmap: Bitmap? = null
     private var pageSize: PdfRender.PageSize? = null
     private var hits: List<PdfOps.TextHit> = emptyList()
+    private var lineHits: List<PdfOps.TextHit> = emptyList()
 
     /** Bitmap pixels per PDF point. Everything tapped converts through this. */
     private var scale = 1f
@@ -164,7 +165,7 @@ class EditorActivity : AppCompatActivity() {
         binding.regionSelect.visibility = if (m == Mode.ERASE) View.VISIBLE else View.GONE
 
         binding.hint.text = when (m) {
-            Mode.EDIT -> "Jis line ko badalna hai uspar tap karein. Ho jaane par upar \"Save\" dabayein."
+            Mode.EDIT -> "Line par tap karein — poori line ek saath badlegi. Dialog mein \"Poori line\" hata kar sirf ek shabd bhi badal sakte hain."
             Mode.ADD_TEXT -> "Jahan naya text likhna hai wahan tap karein."
             Mode.ERASE -> "Jo hissa mitana hai uspar ungli se box kheenchein. Patch page ke rang ka hoga, border nahi aayegi."
             Mode.SIGN -> "Signature banane ke liye tap karein, phir jagah chunein."
@@ -207,6 +208,7 @@ class EditorActivity : AppCompatActivity() {
             pageBitmap = bitmap
             pageSize = size
             hits = found
+            lineHits = PdfOps.mergeIntoLines(found)
             scale = bitmap.width / size.widthPt
 
             binding.pageImage.setImageBitmap(bitmap)
@@ -235,11 +237,12 @@ class EditorActivity : AppCompatActivity() {
 
         when (mode) {
             Mode.EDIT -> {
-                val hit = findHit(pdfX, pdfY)
-                if (hit == null) {
+                val line = findHit(lineHits, pdfX, pdfY)
+                val word = findHit(hits, pdfX, pdfY)
+                if (line == null && word == null) {
                     Toast.makeText(this, "Yahan koi text nahi mila.", Toast.LENGTH_SHORT).show()
                 } else {
-                    askReplacement(hit)
+                    askReplacement(line ?: word!!, word ?: line!!)
                 }
             }
 
@@ -262,11 +265,15 @@ class EditorActivity : AppCompatActivity() {
      * fingertip — requiring an exact hit made most taps miss and report
      * "no text here" on a page that was full of text.
      */
-    private fun findHit(pdfX: Float, pdfY: Float): PdfOps.TextHit? {
-        hits.firstOrNull { it.contains(pdfX, pdfY) }?.let { return it }
+    private fun findHit(
+        candidates: List<PdfOps.TextHit>,
+        pdfX: Float,
+        pdfY: Float
+    ): PdfOps.TextHit? {
+        candidates.firstOrNull { it.contains(pdfX, pdfY) }?.let { return it }
 
         // Within half a line height counts as aiming at that line.
-        return hits
+        return candidates
             .filter { pdfY >= it.top - it.height && pdfY <= it.bottom + it.height }
             .minByOrNull { h ->
                 val dx = when {
@@ -279,22 +286,47 @@ class EditorActivity : AppCompatActivity() {
             }
     }
 
-    private fun askReplacement(hit: PdfOps.TextHit) {
+    /**
+     * [line] is the whole visual line, [word] the single run under the finger.
+     * The line is the default because rewriting a line as one piece avoids
+     * fighting its neighbours for space; the checkbox narrows to the run for
+     * cases where only one value should move.
+     */
+    private fun askReplacement(line: PdfOps.TextHit, word: PdfOps.TextHit) {
         val input = EditText(this).apply {
-            setText(hit.text)
-            setSelection(hit.text.length)
+            setText(line.text)
+            setSelection(line.text.length)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
-            setPadding(48, 32, 48, 32)
+        }
+
+        val wholeLine = CheckBox(this).apply {
+            text = "Poori line"
+            isChecked = true
+            isEnabled = line !== word
+            setOnCheckedChangeListener { _, checked ->
+                val target = if (checked) line else word
+                input.setText(target.text)
+                input.setSelection(target.text.length)
+            }
+        }
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 24, 48, 8)
+            addView(input)
+            addView(wholeLine)
         }
 
         AlertDialog.Builder(this)
             .setTitle("Text badlein")
-            .setView(input)
+            .setView(container)
             .setPositiveButton("Apply") { _, _ ->
-                applyReplacement(hit, input.text.toString())
+                val target = if (wholeLine.isChecked) line else word
+                applyReplacement(target, input.text.toString())
             }
             .setNeutralButton("Mitayein") { _, _ ->
-                applyReplacement(hit, "")
+                val target = if (wholeLine.isChecked) line else word
+                applyReplacement(target, "")
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -328,8 +360,8 @@ class EditorActivity : AppCompatActivity() {
         // next on the same line. Replacing "Rs." with "Rupees" next to an amount
         // overlapped the amount until this was taken into account.
         val neighbourLeft = hits
-            .filter { it !== hit && it.left > hit.left }
-            .filter { it.top < hit.bottom && it.bottom > hit.top }   // same line
+            .filter { it.left >= hit.right }                          // strictly after it
+            .filter { it.top < hit.bottom && it.bottom > hit.top }    // same line
             .minOfOrNull { it.left }
 
         val room = if (neighbourLeft != null) {

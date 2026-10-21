@@ -11,8 +11,8 @@ android {
         applicationId = "com.waz.pocketpdf"
         minSdk = 24
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.5"
+        versionCode = 7
+        versionName = "1.6"
     }
 
     // A keystore that lives in the repo, so every build — local or CI — signs

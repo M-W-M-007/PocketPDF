@@ -109,6 +109,59 @@ object PdfOps {
         return hits
     }
 
+    /**
+     * Groups the runs on a page into whole visual lines.
+     *
+     * PDF stores text as many small runs — "Rs." and "100" are separate objects
+     * sitting side by side. Editing one of them alone means squeezing the new
+     * text into whatever gap its neighbour leaves, which either overlaps the
+     * neighbour or shrinks the text. Rewriting the whole line sidesteps that:
+     * the line is cleared once and redrawn as a single piece.
+     *
+     * Runs join only when they overlap vertically AND sit close horizontally,
+     * so the two halves of a two-column layout stay separate lines.
+     */
+    fun mergeIntoLines(hits: List<TextHit>): List<TextHit> {
+        if (hits.isEmpty()) return emptyList()
+
+        val sorted = hits.sortedWith(compareBy({ it.top }, { it.left }))
+        val lines = mutableListOf<MutableList<TextHit>>()
+
+        for (hit in sorted) {
+            val line = lines.lastOrNull()?.takeIf { current ->
+                val last = current.last()
+
+                val overlap = minOf(last.bottom, hit.bottom) - maxOf(last.top, hit.top)
+                val sameRow = overlap > minOf(last.height, hit.height) * 0.5f
+
+                // A gap wider than a couple of characters means a different
+                // column, not the next word.
+                val gap = hit.left - last.right
+                val close = gap < maxOf(last.fontSize, hit.fontSize) * 2.5f && gap > -2f
+
+                sameRow && close
+            }
+
+            if (line == null) lines += mutableListOf(hit) else line += hit
+        }
+
+        return lines.map { parts ->
+            if (parts.size == 1) return@map parts.first()
+
+            TextHit(
+                text = parts.joinToString(" ") { it.text }.replace("  ", " "),
+                left = parts.minOf { it.left },
+                top = parts.minOf { it.top },
+                right = parts.maxOf { it.right },
+                bottom = parts.maxOf { it.bottom },
+                fontSize = parts.maxOf { it.fontSize },
+                // Mixed weight cannot be reproduced in one run, so the line is
+                // treated as bold only when all of it was bold.
+                bold = parts.all { it.bold }
+            )
+        }
+    }
+
     fun pageCount(file: File): Int =
         PDDocument.load(file).use { it.numberOfPages }
 
